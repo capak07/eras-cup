@@ -58,67 +58,140 @@
   }
   function availSet() { var m = {}; G.avail.forEach(function (s) { m[s.t] = 1; }); return m; }
 
-  // ---------- Previews (iTunes Search API: free, no key, 30-second clips) ----------
+  // ---------- Previews ----------
+  // Two free, keyless sources of 30-second clips: the iTunes Search API (CORS) and the Deezer
+  // API (JSONP). Only Taylor Swift's own recordings count: results are matched on her artist
+  // id, and karaoke, tribute, lullaby and instrumental covers are rejected, since those have no
+  // singing. If both sources have the song, "Other clip" switches between them.
+  var TS_ITUNES = 159260351, TS_DEEZER = 12246;
+  var COVER = /karaoke|instrumental|tribute|lullab|made famous|originally performed|in the style of|as made|piano version|string quartet|music box|8-bit|rockabye|backing track/i;
+  var VARIANT = /\b(live|remix|mix|acoustic|demo|voice memo|piano|orchestral|edit|version\)|stripped|sped up|slowed)\b/i;
   var audio = new Audio(), playing = null, previews = {};
   audio.preload = 'none';
   function norm(s) {
-    return String(s).toLowerCase().replace(/\((taylor.s version|from the vault|feat[^)]*|with [^)]*)\)|\[[^\]]*\]/g, ' ')
+    return String(s).toLowerCase()
+      .replace(/\((taylor.s version|from the vault|feat[^)]*|with [^)]*)\)|\[[^\]]*\]/g, ' ')
       .replace(/[‘’]/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
   }
-  function findPreview(song) {
-    if (previews[song.t]) return previews[song.t];
-    var term = encodeURIComponent('Taylor Swift ' + song.t);
-    previews[song.t] = fetch('https://itunes.apple.com/search?term=' + term + '&entity=song&limit=15&country=US')
+  function score(song, name, extra) {
+    var want = norm(song.t), base = norm(song.t.replace(/\s*\([^)]*\)\s*/g, ' ')), got = norm(name);
+    if (COVER.test(name + ' ' + extra) && !COVER.test(song.t)) return 0;
+    var sc = got === want ? 50 : got.indexOf(want) === 0 ? 40 : got.indexOf(want) !== -1 ? 30 :
+      (base && base !== want && (got === base ? 20 : got.indexOf(base) === 0 ? 10 : 0)) || 0;
+    if (sc && VARIANT.test(name.replace(/taylor.s version/i, '')) && !VARIANT.test(song.t)) sc -= 8; // prefer the studio original
+    return sc;
+  }
+  // Search on the title without its bracketed part ("Karma (remixed version)" -> "Karma");
+  // the scoring still prefers the exact version.
+  function term(song) { var b = song.t.replace(/\s*\([^)]*\)\s*/g, ' ').trim(); return 'taylor swift ' + (b || song.t); }
+  function jsonp(url) {
+    return new Promise(function (resolve, reject) {
+      var cb = '__dz' + Math.random().toString(36).slice(2), s = document.createElement('script');
+      var timer = setTimeout(function () { done(); reject(new Error('timeout')); }, 8000);
+      function done() { clearTimeout(timer); delete window[cb]; s.remove(); }
+      window[cb] = function (data) { done(); resolve(data); };
+      s.onerror = function () { done(); reject(new Error('jsonp')); };
+      s.src = url + '&output=jsonp&callback=' + cb;
+      document.head.appendChild(s);
+    });
+  }
+  function fromItunes(song) {
+    return fetch('https://itunes.apple.com/search?term=' + encodeURIComponent(term(song)) + '&entity=song&limit=25&country=US')
       .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
       .then(function (d) {
-        // A remix or live title like "Karma (remixed version)" falls back to its base name.
-        var want = norm(song.t), base = norm(song.t.replace(/\s*\([^)]*\)\s*/g, ' ')), best = null, bestScore = 0;
+        var best = null, bs = 0;
         (d.results || []).forEach(function (r) {
           if (!r.previewUrl) return;
-          var who = (r.artistName + ' ' + r.trackName).toLowerCase();
-          if (who.indexOf('taylor swift') === -1) return;
-          var got = norm(r.trackName);
-          var sc = got === want ? 5 : got.indexOf(want) === 0 ? 4 : got.indexOf(want) !== -1 ? 3 :
-            (base && base !== want && (got === base ? 2 : got.indexOf(base) === 0 ? 1 : 0)) || 0;
-          if (sc > bestScore) { best = r; bestScore = sc; }
+          var hers = r.artistId === TS_ITUNES || /taylor swift/i.test(r.artistName) || /(feat\.?|with) taylor swift/i.test(r.trackName);
+          if (!hers) return;
+          var sc = score(song, r.trackName, r.artistName + ' ' + (r.collectionName || ''));
+          if (sc > bs) { best = r; bs = sc; }
         });
-        return best ? { url: best.previewUrl, link: best.trackViewUrl, name: best.trackName } : null;
+        return best ? { url: best.previewUrl, link: best.trackViewUrl, src: 'Apple Music', sc: bs } : null;
       })
-      .catch(function () { delete previews[song.t]; return null; });
+      .catch(function () { return null; });
+  }
+  function fromDeezer(song) {
+    return jsonp('https://api.deezer.com/search?q=' + encodeURIComponent(term(song)) + '&limit=25')
+      .then(function (d) {
+        var best = null, bs = 0;
+        (d.data || []).forEach(function (r) {
+          if (!r.preview) return;
+          var hers = (r.artist && r.artist.id === TS_DEEZER) || /(feat\.?|with) taylor swift/i.test(r.title);
+          if (!hers) return;
+          var sc = score(song, r.title, (r.artist && r.artist.name || '') + ' ' + (r.album && r.album.title || ''));
+          if (sc > bs) { best = r; bs = sc; }
+        });
+        return best ? { url: best.preview, link: best.link, src: 'Deezer', sc: bs } : null;
+      })
+      .catch(function () { return null; });
+  }
+  // Resolves to a list of clips, best match first (empty when neither source has the song).
+  function findPreviews(song) {
+    if (!previews[song.t]) {
+      previews[song.t] = Promise.all([fromItunes(song), fromDeezer(song)]).then(function (r) {
+        var list = r.filter(Boolean).sort(function (a, b) { return b.sc - a.sc; });
+        if (!list.length) delete previews[song.t]; // try again next time (network blips)
+        return list;
+      });
+    }
     return previews[song.t];
   }
   function playerEl(slot) { return document.querySelector('#card' + slot.toUpperCase() + ' .player'); }
-  function setPlayer(slot, mode, info) {
+  function setPlayer(slot, mode, clip, count) {
     var p = playerEl(slot); if (!p) return;
     p.dataset.mode = mode;
-    var lbl = p.querySelector('.p-label');
-    lbl.textContent = { idle: 'Play preview', loading: 'Finding preview…', playing: 'Playing preview', paused: 'Paused', none: 'No preview found' }[mode];
-    p.querySelector('.play').innerHTML = '<i data-lucide="' + (mode === 'playing' ? 'pause' : mode === 'loading' ? 'loader-circle' : 'play') + '"></i>';
-    p.querySelector('.play').disabled = mode === 'none';
-    if (info && info.link) { var a = p.querySelector('.am'); a.href = info.link; a.hidden = false; }
+    var src = clip ? ' · ' + clip.src : '';
+    p.querySelector('.p-label').textContent = { idle: 'Play preview', loading: 'Finding preview…', playing: 'Playing' + src, paused: 'Paused' + src, none: 'No preview found' }[mode];
+    var btn = p.querySelector('.play');
+    btn.innerHTML = '<i data-lucide="' + (mode === 'playing' ? 'pause' : mode === 'loading' ? 'loader-circle' : 'play') + '"></i>';
+    btn.disabled = mode === 'none';
+    if (clip) {
+      var a = p.querySelector('.am'); a.href = clip.link; a.hidden = !clip.link;
+      a.firstChild.nodeValue = clip.src + ' ';
+    }
+    if (count !== undefined) p.querySelector('.alt').hidden = count < 2;
     icons();
   }
   function stopAudio() {
     audio.pause();
-    if (playing) { var s = playing.slot; playing = null; setPlayer(s, 'idle'); var b = playerEl(s); if (b) b.querySelector('.pbar > div').style.width = '0'; }
+    if (playing) {
+      var s = playing.slot; playing = null; setPlayer(s, 'idle');
+      var b = playerEl(s); if (b) b.querySelector('.pbar > div').style.width = '0';
+    }
+  }
+  function startClip(slot, title, list, i) {
+    var clip = list[i];
+    playing = { slot: slot, title: title, list: list, i: i };
+    audio.src = clip.url;
+    audio.play().then(function () { setPlayer(slot, 'playing', clip, list.length); },
+      function () {
+        // A dead clip (Deezer links expire): fall through to the next source, if any.
+        if (i + 1 < list.length) startClip(slot, title, list, i + 1);
+        else { playing = null; setPlayer(slot, 'none'); }
+      });
   }
   function togglePlay(slot) {
     var title = state[slot], song = title && byTitle[title];
     if (!song) return;
-    if (playing && playing.slot === slot && playing.title === title) {
-      if (audio.paused) { audio.play().catch(function () {}); setPlayer(slot, 'playing'); }
-      else { audio.pause(); setPlayer(slot, 'paused'); }
+    if (playing && playing.slot === slot && playing.title === title && playing.list) {
+      if (audio.paused) { audio.play().catch(function () {}); setPlayer(slot, 'playing', playing.list[playing.i]); }
+      else { audio.pause(); setPlayer(slot, 'paused', playing.list[playing.i]); }
       return;
     }
     stopAudio();
     playing = { slot: slot, title: title };
     setPlayer(slot, 'loading');
-    findPreview(song).then(function (info) {
+    findPreviews(song).then(function (list) {
       if (!playing || playing.slot !== slot || playing.title !== title) return;
-      if (!info) { playing = null; setPlayer(slot, 'none'); return; }
-      audio.src = info.url;
-      audio.play().then(function () { setPlayer(slot, 'playing', info); }, function () { playing = null; setPlayer(slot, 'idle', info); });
+      if (!list.length) { playing = null; setPlayer(slot, 'none'); return; }
+      startClip(slot, title, list, 0);
     });
+  }
+  function otherClip(slot) {
+    if (!playing || playing.slot !== slot || !playing.list || playing.list.length < 2) return;
+    audio.pause();
+    startClip(slot, playing.title, playing.list, (playing.i + 1) % playing.list.length);
   }
   audio.addEventListener('timeupdate', function () {
     if (!playing) return;
@@ -126,6 +199,23 @@
     if (p && audio.duration) p.querySelector('.pbar > div').style.width = (audio.currentTime / audio.duration) * 100 + '%';
   });
   audio.addEventListener('ended', function () { stopAudio(); });
+
+  // ---------- Visitor counter (Abacus: free, no key) ----------
+  // Counts each browser once: the first visit increments, later visits only read the total.
+  function visitors() {
+    var el = $('visitors'); if (!el) return;
+    var base = 'https://abacus.jasoncameron.dev/', key = 'eras-cup-atharva/visitors', seen = false;
+    try { seen = localStorage.getItem('eras-cup-visited') === '1'; } catch (e) {}
+    fetch(base + (seen ? 'get/' : 'hit/') + key)
+      .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function (d) {
+        if (typeof d.value !== 'number') return;
+        if (!seen) { try { localStorage.setItem('eras-cup-visited', '1'); } catch (e) {} }
+        el.innerHTML = '<i data-lucide="eye"></i>' + d.value.toLocaleString() + ' ' + (d.value === 1 ? 'visitor' : 'visitors');
+        el.hidden = false; icons();
+      })
+      .catch(function () { /* counter offline: leave it hidden */ });
+  }
 
   // ---------- Rendering ----------
   function cardHTML(slot) {
@@ -135,7 +225,8 @@
         '<div class="album"><span class="dot"></span>' + esc(s.a) + (s.y ? ' · ' + s.y : '') + '</div>' +
         '<div class="player" data-mode="idle">' +
           '<button class="play" type="button" data-play="' + slot + '" aria-label="Play preview of ' + esc(s.t) + '"><i data-lucide="play"></i></button>' +
-          '<div class="p-body"><div class="p-top"><span class="p-label">Play preview</span><a class="am" target="_blank" rel="noopener" hidden>Apple Music <i data-lucide="arrow-up-right"></i></a></div>' +
+          '<div class="p-body"><div class="p-top"><span class="p-label">Play preview</span><span class="p-links"><button class="alt" type="button" data-alt="' + slot + '" hidden><i data-lucide="shuffle"></i>Other clip</button>' +
+          '<a class="am" target="_blank" rel="noopener" hidden>Listen <i data-lucide="arrow-up-right"></i></a></span></div>' +
           '<div class="pbar"><div></div></div></div>' +
         '</div>'
       : '<div class="empty"><i data-lucide="music-2"></i>Choose a song from the dropdown</div>';
@@ -155,7 +246,8 @@
     el.style.setProperty('--era', s ? eraVar(s) : 'var(--border)');
     el.innerHTML = cardHTML(slot);
     if (playing && playing.slot === slot && playing.title === state[slot]) {
-      setPlayer(slot, audio.paused ? 'paused' : 'playing');
+      if (playing.list) setPlayer(slot, audio.paused ? 'paused' : 'playing', playing.list[playing.i], playing.list.length);
+      else setPlayer(slot, 'loading');
     } else if (playing && playing.slot === slot) {
       audio.pause(); playing = null;
     }
@@ -330,10 +422,11 @@
     if (openCombo && !e.target.closest('.combo')) closeCombo();
   });
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-keep], [data-load], [data-tab], [data-play], #undoBtn, #resetBtn, #randomBtn, #againBtn, #shareBtn');
+    var t = e.target.closest('[data-keep], [data-load], [data-tab], [data-play], [data-alt], #undoBtn, #resetBtn, #randomBtn, #againBtn, #shareBtn');
     if (!t) return;
     if (t.dataset.keep) keep(t.dataset.keep);
     else if (t.dataset.play) togglePlay(t.dataset.play);
+    else if (t.dataset.alt) otherClip(t.dataset.alt);
     else if (t.dataset.load) {
       if (G.isFinal) return;
       var title = t.dataset.load;
@@ -377,4 +470,5 @@
 
   if (!SONGS.length) { $('kicker').textContent = 'Song list failed to load (songs.js must sit next to index.html)'; icons(); return; }
   render();
+  visitors();
 })();

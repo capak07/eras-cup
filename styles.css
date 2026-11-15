@@ -338,3 +338,13 @@
     .actions .btn-ghost { font-size: 0; gap: 0; }
     .actions .btn-ghost svg { width: 17px; height: 17px; }
   }
+
+  /* Preview: second source + visitor count */
+  .p-links { display: inline-flex; align-items: center; gap: 10px; }
+  .alt { display: inline-flex; align-items: center; gap: 3px; padding: 0 !important; font-size: 0.72rem; color: var(--muted-foreground) !important; background: none !important; border: 0 !important; }
+  .alt:hover { color: var(--primary) !important; }
+  .alt svg { width: 12px; height: 12px; }
+  .alt[hidden], .am[hidden] { display: none; }
+  .visitors { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted-foreground); }
+  .visitors[hidden] { display: none; }
+  .visitors svg { width: 13px; height: 13px; color: var(--primary); }

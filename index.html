@@ -32,11 +32,11 @@
   <section class="hero" id="hero">
     <div class="kicker"><span id="totalCount">0</span> songs · one champion</div>
     <h2>Which song <em>survives</em> them all?</h2>
-    <p class="lede">Put any two songs head to head. Keep one, and the other is out for good. Keep going until two remain, then crown your champion in the final.</p>
+    <p class="lede">Put any two songs head to head. Keep one, and the other is out for good. Winners wait for the next round, until two remain for the final.</p>
     <ol class="steps">
       <li><span class="n">01</span><b>Pick two songs</b><span class="d">Search either dropdown, or tap a song in the list. You choose every matchup.</span></li>
-      <li><span class="n">02</span><b>Keep one</b><span class="d">The song you keep goes back in the pool. The other is eliminated.</span></li>
-      <li><span class="n">03</span><b>Reach the final</b><span class="d">When two songs are left, the final decides your champion.</span></li>
+      <li><span class="n">02</span><b>Listen, then keep one</b><span class="d">Play a 30-second preview of each. The song you keep goes through to the next round. The other is out.</span></li>
+      <li><span class="n">03</span><b>Win round by round</b><span class="d">Every song battles once a round. When two songs are left, the final decides your champion.</span></li>
     </ol>
     <button class="keep" id="startBtn" type="button"><i data-lucide="swords"></i><span id="startLabel">Start battling</span></button>
   </section>
@@ -67,12 +67,12 @@
   <section class="champion" id="champion" aria-live="polite"></section>
 
   <div class="tabs" role="tablist">
-    <button class="tab on" data-tab="standing" type="button">Still standing</button>
+    <button class="tab on" data-tab="standing" type="button">This round</button>
     <button class="tab" data-tab="out" type="button">Eliminated</button>
   </div>
   <section class="lists">
     <div class="panel on" id="panel-standing">
-      <div class="panel-head"><h3>Still standing</h3><span id="standingHint">Click a song to load it</span></div>
+      <div class="panel-head"><h3 id="standingTitle">Still to battle</h3><span id="standingHint">Click a song to load it</span></div>
       <div class="filters">
         <select id="eraFilter" aria-label="Filter by era"></select>
         <input id="listSearch" type="search" placeholder="Search songs" aria-label="Search standing songs">
@@ -85,7 +85,7 @@
     </div>
   </section>
 
-  <footer>A fan-made game, not affiliated with Taylor Swift. Song list from Wikipedia. Progress is saved in this browser.</footer>
+  <footer>A fan-made game, not affiliated with Taylor Swift. Song list from Wikipedia. Previews by Apple Music. Progress is saved in this browser.</footer>
 </div>
 
 <script src="songs.js"></script>

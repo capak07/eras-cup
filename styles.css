@@ -281,3 +281,39 @@
   .champ-actions .keep { margin-top: 0; }
   .champ-actions .btn-ghost { padding: 12px 20px; }
   @media (max-width: 760px) { .steps { grid-template-columns: 1fr; } }
+
+  /* Rounds */
+  .arena-title h2 .of { font-size: 0.7em; color: var(--muted-foreground); font-style: normal; }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; z-index: 60; width: min(560px, calc(100vw - 32px));
+    padding: 14px 18px; font-size: 0.9rem; line-height: 1.45; text-align: center;
+    background: var(--popover); color: var(--popover-foreground);
+    border: 1px solid color-mix(in oklch, var(--primary) 55%, var(--border)); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg), var(--shadow-glow);
+    opacity: 0; transform: translate(-50%, 16px); pointer-events: none; transition: opacity 300ms, transform 300ms;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast b { color: var(--primary); }
+  .toast span { display: block; color: var(--muted-foreground); font-size: 0.82rem; margin-top: 2px; }
+
+  /* Preview player */
+  .player { display: flex; align-items: center; gap: 12px; width: 100%; max-width: 320px; margin-top: 18px; padding: 10px 12px; text-align: left;
+    background: color-mix(in oklch, var(--era) 10%, var(--muted)); border: 1px solid var(--border); border-radius: var(--radius-md); }
+  .play { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50% !important;
+    color: var(--primary) !important; background: transparent !important; border: 1.5px solid var(--primary) !important; transition: background 200ms, color 200ms, transform 120ms; }
+  .play:hover:not(:disabled) { background: var(--primary) !important; color: var(--primary-foreground) !important; }
+  .play:active:not(:disabled) { transform: scale(0.94); }
+  .play:disabled { opacity: 0.35; cursor: not-allowed; }
+  .play svg { width: 16px; height: 16px; }
+  .player[data-mode="loading"] .play svg { animation: spin 900ms linear infinite; }
+  .player[data-mode="playing"] .play { background: var(--primary) !important; color: var(--primary-foreground) !important; }
+  .p-body { flex: 1; min-width: 0; }
+  .p-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .p-label { font-size: 0.78rem; color: var(--muted-foreground); }
+  .player[data-mode="playing"] .p-label { color: var(--foreground); }
+  .am { display: inline-flex; align-items: center; gap: 2px; font-size: 0.72rem; color: var(--muted-foreground) !important; text-decoration: none; white-space: nowrap; }
+  .am:hover { color: var(--primary) !important; }
+  .am svg { width: 12px; height: 12px; }
+  .pbar { height: 4px; background: var(--border); border-radius: 999px; overflow: hidden; }
+  .pbar > div { height: 100%; width: 0; background: var(--gradient-gold); border-radius: 999px; transition: width 250ms linear; }
+  @keyframes spin { to { transform: rotate(360deg); } }

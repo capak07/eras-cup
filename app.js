@@ -6,7 +6,7 @@
   var byTitle = {};
   SONGS.forEach(function (s) { byTitle[s.t] = s; });
 
-  // state.out = [{ l: loserTitle, w: winnerTitle }], oldest first. state.champ = title or null.
+  // state.out = [{ l: loserTitle, w: winnerTitle }], oldest first. Rounds are replayed from it.
   var state = { out: [], a: null, b: null, champ: null };
   try {
     var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
@@ -17,20 +17,127 @@
   } catch (e) { /* storage unavailable: play without saving */ }
 
   var $ = function (id) { return document.getElementById(id); };
-  var busy = false, lastOutCount = -1, openCombo = null;
+  var busy = false, lastOutCount = -1, lastRound = 0, openCombo = null, G = null;
 
   function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function eraVar(s) { return 'var(--era-' + s.e + ')'; }
-  function outSet() { var m = {}; state.out.forEach(function (o) { m[o.l] = 1; }); return m; }
-  function standing() { var m = outSet(); return SONGS.filter(function (s) { return !m[s.t]; }); }
   function icons() { if (window.lucide) window.lucide.createIcons(); }
 
+  // ---------- Rounds ----------
+  // Replays every battle. In a round each song battles once; a winner sits out until the
+  // round ends. When fewer than two songs are left to battle, the round ends and a leftover
+  // song gets a bye. Two songs left in total is the final.
+  function derive() {
+    var out = {}, played = {}, round = 1, start = SONGS.length, inRound = 0, byes = [], rs = [];
+    function standing() { return SONGS.filter(function (s) { return !out[s.t]; }); }
+    state.out.forEach(function (e) {
+      rs.push(round);
+      out[e.l] = 1; played[e.w] = 1; inRound++;
+      var st = standing();
+      if (st.length <= 2) return;
+      var avail = st.filter(function (s) { return !played[s.t]; });
+      if (avail.length < 2) {
+        if (avail.length === 1) byes.push({ t: avail[0].t, r: round });
+        round++; played = {}; start = st.length; inRound = 0;
+      }
+    });
+    var st = standing();
+    return {
+      standing: st,
+      avail: st.filter(function (s) { return !played[s.t]; }),
+      through: st.length - st.filter(function (s) { return !played[s.t]; }).length,
+      round: round, start: start, battleNo: inRound + 1, battles: Math.floor(start / 2),
+      byes: byes, rounds: rs, isFinal: st.length === 2
+    };
+  }
+  function stageName(n) {
+    if (n <= 4) return 'Semi-finals';
+    if (n <= 8) return 'Quarter-finals';
+    return '';
+  }
+  function availSet() { var m = {}; G.avail.forEach(function (s) { m[s.t] = 1; }); return m; }
+
+  // ---------- Previews (iTunes Search API: free, no key, 30-second clips) ----------
+  var audio = new Audio(), playing = null, previews = {};
+  audio.preload = 'none';
+  function norm(s) {
+    return String(s).toLowerCase().replace(/\((taylor.s version|from the vault|feat[^)]*|with [^)]*)\)|\[[^\]]*\]/g, ' ')
+      .replace(/[‘’]/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function findPreview(song) {
+    if (previews[song.t]) return previews[song.t];
+    var term = encodeURIComponent('Taylor Swift ' + song.t);
+    previews[song.t] = fetch('https://itunes.apple.com/search?term=' + term + '&entity=song&limit=15&country=US')
+      .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function (d) {
+        // A remix or live title like "Karma (remixed version)" falls back to its base name.
+        var want = norm(song.t), base = norm(song.t.replace(/\s*\([^)]*\)\s*/g, ' ')), best = null, bestScore = 0;
+        (d.results || []).forEach(function (r) {
+          if (!r.previewUrl) return;
+          var who = (r.artistName + ' ' + r.trackName).toLowerCase();
+          if (who.indexOf('taylor swift') === -1) return;
+          var got = norm(r.trackName);
+          var sc = got === want ? 5 : got.indexOf(want) === 0 ? 4 : got.indexOf(want) !== -1 ? 3 :
+            (base && base !== want && (got === base ? 2 : got.indexOf(base) === 0 ? 1 : 0)) || 0;
+          if (sc > bestScore) { best = r; bestScore = sc; }
+        });
+        return best ? { url: best.previewUrl, link: best.trackViewUrl, name: best.trackName } : null;
+      })
+      .catch(function () { delete previews[song.t]; return null; });
+    return previews[song.t];
+  }
+  function playerEl(slot) { return document.querySelector('#card' + slot.toUpperCase() + ' .player'); }
+  function setPlayer(slot, mode, info) {
+    var p = playerEl(slot); if (!p) return;
+    p.dataset.mode = mode;
+    var lbl = p.querySelector('.p-label');
+    lbl.textContent = { idle: 'Play preview', loading: 'Finding preview…', playing: 'Playing preview', paused: 'Paused', none: 'No preview found' }[mode];
+    p.querySelector('.play').innerHTML = '<i data-lucide="' + (mode === 'playing' ? 'pause' : mode === 'loading' ? 'loader-circle' : 'play') + '"></i>';
+    p.querySelector('.play').disabled = mode === 'none';
+    if (info && info.link) { var a = p.querySelector('.am'); a.href = info.link; a.hidden = false; }
+    icons();
+  }
+  function stopAudio() {
+    audio.pause();
+    if (playing) { var s = playing.slot; playing = null; setPlayer(s, 'idle'); var b = playerEl(s); if (b) b.querySelector('.pbar > div').style.width = '0'; }
+  }
+  function togglePlay(slot) {
+    var title = state[slot], song = title && byTitle[title];
+    if (!song) return;
+    if (playing && playing.slot === slot && playing.title === title) {
+      if (audio.paused) { audio.play().catch(function () {}); setPlayer(slot, 'playing'); }
+      else { audio.pause(); setPlayer(slot, 'paused'); }
+      return;
+    }
+    stopAudio();
+    playing = { slot: slot, title: title };
+    setPlayer(slot, 'loading');
+    findPreview(song).then(function (info) {
+      if (!playing || playing.slot !== slot || playing.title !== title) return;
+      if (!info) { playing = null; setPlayer(slot, 'none'); return; }
+      audio.src = info.url;
+      audio.play().then(function () { setPlayer(slot, 'playing', info); }, function () { playing = null; setPlayer(slot, 'idle', info); });
+    });
+  }
+  audio.addEventListener('timeupdate', function () {
+    if (!playing) return;
+    var p = playerEl(playing.slot);
+    if (p && audio.duration) p.querySelector('.pbar > div').style.width = (audio.currentTime / audio.duration) * 100 + '%';
+  });
+  audio.addEventListener('ended', function () { stopAudio(); });
+
+  // ---------- Rendering ----------
   function cardHTML(slot) {
-    var title = state[slot], s = title && byTitle[title], isFinal = document.body.classList.contains('final');
+    var title = state[slot], s = title && byTitle[title];
     var body = s
       ? '<div class="title">' + esc(s.t) + '</div>' + (s.by ? '<div class="feat">' + esc(s.by) + '</div>' : '') +
-        '<div class="album"><span class="dot"></span>' + esc(s.a) + (s.y ? ' · ' + s.y : '') + '</div>'
+        '<div class="album"><span class="dot"></span>' + esc(s.a) + (s.y ? ' · ' + s.y : '') + '</div>' +
+        '<div class="player" data-mode="idle">' +
+          '<button class="play" type="button" data-play="' + slot + '" aria-label="Play preview of ' + esc(s.t) + '"><i data-lucide="play"></i></button>' +
+          '<div class="p-body"><div class="p-top"><span class="p-label">Play preview</span><a class="am" target="_blank" rel="noopener" hidden>Apple Music <i data-lucide="arrow-up-right"></i></a></div>' +
+          '<div class="pbar"><div></div></div></div>' +
+        '</div>'
       : '<div class="empty"><i data-lucide="music-2"></i>Choose a song from the dropdown</div>';
     return '<div class="combo" data-slot="' + slot + '">' +
         '<i data-lucide="search" class="ico ico-l"></i>' +
@@ -39,7 +146,7 @@
         '<ul class="combo-list" role="listbox" hidden></ul>' +
       '</div>' +
       '<div class="song swap">' + body + '</div>' +
-      '<button class="keep" type="button" data-keep="' + slot + '"' + (state.a && state.b ? '' : ' disabled') + '><i data-lucide="' + (isFinal ? 'trophy' : 'heart') + '"></i>' + (isFinal ? 'Crown this song' : 'Keep this song') + '</button>';
+      '<button class="keep" type="button" data-keep="' + slot + '"' + (state.a && state.b ? '' : ' disabled') + '><i data-lucide="' + (G.isFinal ? 'trophy' : 'heart') + '"></i>' + (G.isFinal ? 'Crown this song' : 'Keep this song') + '</button>';
   }
 
   function renderCard(slot) {
@@ -47,16 +154,24 @@
     el.className = 'card' + (s ? ' filled' : '');
     el.style.setProperty('--era', s ? eraVar(s) : 'var(--border)');
     el.innerHTML = cardHTML(slot);
+    if (playing && playing.slot === slot && playing.title === state[slot]) {
+      setPlayer(slot, audio.paused ? 'paused' : 'playing');
+    } else if (playing && playing.slot === slot) {
+      audio.pause(); playing = null;
+    }
   }
 
   function render() {
-    var st = standing(), total = SONGS.length, outN = state.out.length;
-    var isFinal = st.length === 2 && !state.champ;
-    document.body.classList.toggle('final', isFinal);
+    G = derive();
+    var total = SONGS.length, outN = state.out.length;
+    // Drop slot picks that are no longer eligible this round (after undo, reset or a new round).
+    var ok = availSet();
+    if (!G.isFinal) { if (state.a && !ok[state.a]) state.a = null; if (state.b && !ok[state.b]) state.b = null; }
+    document.body.classList.toggle('final', G.isFinal && !state.champ);
     document.body.classList.toggle('done', !!state.champ);
-    if (isFinal) { state.a = st[0].t; state.b = st[1].t; }
+    if (G.isFinal && !state.champ) { state.a = G.standing[0].t; state.b = G.standing[1].t; }
 
-    $('standingCount').textContent = state.champ ? 1 : st.length;
+    $('standingCount').textContent = state.champ ? 1 : G.standing.length;
     $('outCount').textContent = state.champ ? total - 1 : outN;
     if (lastOutCount !== -1 && lastOutCount !== outN) {
       ['standingCount', 'outCount'].forEach(function (id) { var n = $(id); n.classList.remove('bump'); void n.offsetWidth; n.classList.add('bump'); });
@@ -65,34 +180,38 @@
     $('barFill').style.width = (total > 1 ? (done / (total - 1)) * 100 : 0) + '%';
     $('undoBtn').disabled = outN === 0 && !state.champ;
     $('totalCount').textContent = total;
-    $('startLabel').textContent = outN ? 'Continue at battle #' + (outN + 1) : 'Start battling';
+    $('startLabel').textContent = outN ? 'Continue: Round ' + G.round + ', battle ' + G.battleNo : 'Start battling';
 
-    $('kicker').textContent = isFinal ? 'Two songs remain' : (state.a && state.b ? 'Keep one, eliminate the other' : 'Pick two songs');
-    $('battleTitle').innerHTML = isFinal
+    var stage = stageName(G.start);
+    $('kicker').textContent = G.isFinal ? 'Two songs remain' : 'Round ' + G.round + (stage ? ' · ' + stage : '') + ' · ' + G.avail.length + ' songs left to battle';
+    $('battleTitle').innerHTML = G.isFinal
       ? 'THE FINAL'.split('').map(function (c, i) { return '<span style="animation-delay:' + i * 40 + 'ms">' + (c === ' ' ? '&nbsp;' : c) + '</span>'; }).join('')
-      : 'Battle #' + (outN + 1);
+      : 'Battle ' + G.battleNo + ' <span class="of">of ' + G.battles + '</span>';
     renderCard('a'); renderCard('b');
     $('vs').classList.toggle('live', !!(state.a && state.b));
-    $('randomBtn').disabled = st.length < 2;
+    $('randomBtn').disabled = G.avail.length < 2;
 
-    renderStanding(st); renderOut(); renderChampion();
-    lastOutCount = outN;
+    renderStanding(); renderOut(); renderChampion();
+    if (lastRound && G.round > lastRound && !G.isFinal) roundToast(lastRound);
+    lastOutCount = outN; lastRound = G.round;
     icons(); save();
   }
 
-  function renderStanding(st) {
-    st = st || standing();
+  function renderStanding() {
     var era = $('eraFilter').value, q = $('listSearch').value.trim().toLowerCase();
-    var rows = st.filter(function (s) { return (!era || s.e === era) && (!q || s.t.toLowerCase().indexOf(q) !== -1); });
+    var rows = G.avail.filter(function (s) { return (!era || s.e === era) && (!q || s.t.toLowerCase().indexOf(q) !== -1); });
+    $('standingTitle').textContent = 'Round ' + G.round + ': still to battle';
+    $('standingHint').textContent = G.through ? G.through + ' already through' : 'Click a song to load it';
     $('standingRows').innerHTML = rows.length ? rows.map(function (s) {
       return '<li><button class="row" type="button" data-load="' + esc(s.t) + '" style="--era:' + eraVar(s) + '"><span class="dot"></span><span class="r-title">' + esc(s.t) + '</span><span class="r-sub">' + esc(s.a) + '</span></button></li>';
-    }).join('') : '<li class="none">No songs match.</li>';
+    }).join('') : '<li class="none">' + (G.isFinal ? 'On to the final.' : 'No songs match.') + '</li>';
   }
 
   function renderOut() {
-    var list = state.out.slice().reverse(), fresh = lastOutCount !== -1 && state.out.length > lastOutCount;
-    $('outRows').innerHTML = list.length ? list.map(function (o, i) {
-      return '<li class="row out' + (fresh && i === 0 ? ' new' : '') + '"><i data-lucide="x" class="x"></i><span class="r-title">' + esc(o.l) + '</span><span class="r-sub">lost to ' + esc(o.w) + '</span></li>';
+    var fresh = lastOutCount !== -1 && state.out.length > lastOutCount;
+    var list = state.out.map(function (o, i) { return { o: o, r: G.rounds[i] }; }).reverse();
+    $('outRows').innerHTML = list.length ? list.map(function (x, i) {
+      return '<li class="row out' + (fresh && i === 0 ? ' new' : '') + '"><i data-lucide="x" class="x"></i><span class="r-title">' + esc(x.o.l) + '</span><span class="r-sub">R' + x.r + ' · lost to ' + esc(x.o.w) + '</span></li>';
     }).join('') : '<li class="none">No songs eliminated yet.</li>';
   }
 
@@ -100,14 +219,24 @@
     var el = $('champion');
     if (!state.champ) { el.innerHTML = ''; return; }
     var s = byTitle[state.champ];
-    var beaten = state.out.filter(function (o) { return o.w === s.t; });
+    var beaten = state.out.map(function (o, i) { return { o: o, r: G.rounds[i] }; }).filter(function (x) { return x.o.w === s.t; });
+    var byes = G.byes.filter(function (b) { return b.t === s.t; });
     el.innerHTML = '<div class="trophy"><i data-lucide="trophy"></i></div>' +
       '<div class="kicker">Your champion</div><h2>' + esc(s.t) + '</h2>' +
       '<div class="album" style="--era:' + eraVar(s) + '"><span class="dot"></span>' + esc(s.a) + (s.y ? ' · ' + s.y : '') + '</div>' +
-      '<div class="road"><h3>Road to the title: ' + beaten.length + ' ' + (beaten.length === 1 ? 'win' : 'wins') + '</h3><ul class="rows">' +
-      beaten.map(function (o, i) { var l = byTitle[o.l]; return '<li class="row" style="--era:' + eraVar(l) + ';animation-delay:' + Math.min(i, 20) * 60 + 'ms"><span class="dot"></span><span class="r-title">beat ' + esc(l.t) + '</span><span class="r-sub">' + esc(l.a) + '</span></li>'; }).join('') +
+      '<div class="road"><h3>Road to the title: ' + beaten.length + ' ' + (beaten.length === 1 ? 'win' : 'wins') + (byes.length ? ', ' + byes.length + ' ' + (byes.length === 1 ? 'bye' : 'byes') : '') + '</h3><ul class="rows">' +
+      beaten.map(function (x, i) { var l = byTitle[x.o.l]; return '<li class="row" style="--era:' + eraVar(l) + ';animation-delay:' + Math.min(i, 20) * 60 + 'ms"><span class="dot"></span><span class="r-title">R' + x.r + ' · beat ' + esc(l.t) + '</span><span class="r-sub">' + esc(l.a) + '</span></li>'; }).join('') +
       '</ul></div><div class="champ-actions"><button class="keep" type="button" id="shareBtn"><i data-lucide="copy"></i><span id="shareLabel">Copy my result</span></button>' +
       '<button class="btn-ghost" type="button" id="againBtn"><i data-lucide="rotate-ccw"></i>Play again</button></div>';
+  }
+
+  function roundToast(r) {
+    var bye = G.byes.filter(function (b) { return b.r === r; })[0];
+    var t = $('toast');
+    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+    t.innerHTML = '<b>Round ' + r + ' complete.</b> ' + G.standing.length + ' songs go through to Round ' + G.round + '.' + (bye ? ' <span>' + esc(bye.t) + ' had no opponent and gets a bye.</span>' : '');
+    t.classList.remove('show'); void t.offsetWidth; t.classList.add('show');
+    clearTimeout(roundToast.timer); roundToast.timer = setTimeout(function () { t.classList.remove('show'); }, 5000);
   }
 
   function confetti() {
@@ -125,11 +254,12 @@
     }
   }
 
+  // ---------- Actions ----------
   function keep(slot) {
     if (busy || !state.a || !state.b) return;
     var winner = state[slot], loser = state[slot === 'a' ? 'b' : 'a'];
-    var isFinal = document.body.classList.contains('final');
-    busy = true; closeCombo();
+    var isFinal = G.isFinal;
+    busy = true; closeCombo(); stopAudio();
     $(slot === 'a' ? 'cardA' : 'cardB').classList.add('win');
     $(slot === 'a' ? 'cardB' : 'cardA').classList.add('lose');
     setTimeout(function () {
@@ -143,10 +273,12 @@
 
   function undo() {
     if (busy) return;
+    stopAudio();
     if (state.champ) state.champ = null;
     var last = state.out.pop();
     if (!last) return;
     state.a = last.w; state.b = last.l;
+    lastRound = 0; // no "round complete" toast when stepping back
     render();
   }
 
@@ -156,11 +288,11 @@
     state[slot] = title; render();
   }
 
-  // Combobox
+  // ---------- Combobox ----------
   function comboOptions(combo) {
     var slot = combo.dataset.slot, other = state[slot === 'a' ? 'b' : 'a'];
     var q = combo.querySelector('input').value.trim().toLowerCase();
-    return standing().filter(function (s) { return s.t !== other && (!q || s.t.toLowerCase().indexOf(q) !== -1 || s.a.toLowerCase().indexOf(q) !== -1); });
+    return G.avail.filter(function (s) { return s.t !== other && (!q || s.t.toLowerCase().indexOf(q) !== -1 || s.a.toLowerCase().indexOf(q) !== -1); });
   }
   function drawCombo(combo) {
     var list = combo.querySelector('.combo-list'), opts = comboOptions(combo);
@@ -200,11 +332,12 @@
     if (openCombo && !e.target.closest('.combo')) closeCombo();
   });
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-keep], [data-load], [data-tab], #undoBtn, #resetBtn, #randomBtn, #againBtn, #startBtn, #shareBtn');
+    var t = e.target.closest('[data-keep], [data-load], [data-tab], [data-play], #undoBtn, #resetBtn, #randomBtn, #againBtn, #startBtn, #shareBtn');
     if (!t) return;
     if (t.dataset.keep) keep(t.dataset.keep);
+    else if (t.dataset.play) togglePlay(t.dataset.play);
     else if (t.dataset.load) {
-      if (document.body.classList.contains('final')) return;
+      if (G.isFinal) return;
       var title = t.dataset.load;
       if (state.a === title || state.b === title) return;
       setSlot(!state.a ? 'a' : 'b', title);
@@ -233,14 +366,14 @@
         var ok = false; try { ok = document.execCommand('copy'); } catch (err) {}
         ta.remove(); done(ok);
       }
-    }
-    else if (t.id === 'randomBtn') {
-      var st = standing(); if (st.length < 2) return;
-      var i = Math.floor(Math.random() * st.length), j = Math.floor(Math.random() * (st.length - 1)); if (j >= i) j++;
-      state.a = st[i].t; state.b = st[j].t; render();
+    } else if (t.id === 'randomBtn') {
+      var av = G.avail; if (av.length < 2) return;
+      var i = Math.floor(Math.random() * av.length), j = Math.floor(Math.random() * (av.length - 1)); if (j >= i) j++;
+      state.a = av[i].t; state.b = av[j].t; render();
     } else if (t.id === 'resetBtn' || t.id === 'againBtn') {
       if (t.id === 'resetBtn' && state.out.length && !window.confirm('Start over? All ' + state.out.length + ' battles will be cleared.')) return;
-      state = { out: [], a: null, b: null, champ: null }; lastOutCount = -1; render();
+      stopAudio();
+      state = { out: [], a: null, b: null, champ: null }; lastOutCount = -1; lastRound = 0; render();
     }
   });
 

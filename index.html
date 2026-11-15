@@ -24,22 +24,11 @@
       </div>
     </div>
     <div class="actions">
-      <button class="btn-ghost" id="undoBtn" type="button"><i data-lucide="undo-2"></i>Undo</button>
-      <button class="btn-ghost" id="resetBtn" type="button"><i data-lucide="rotate-ccw"></i>Reset</button>
+      <button class="btn-ghost" id="undoBtn" type="button" aria-label="Undo" title="Undo"><i data-lucide="undo-2"></i>Undo</button>
+      <button class="btn-ghost" id="resetBtn" type="button" aria-label="Reset" title="Reset"><i data-lucide="rotate-ccw"></i>Reset</button>
     </div>
   </header>
 
-  <section class="hero" id="hero">
-    <div class="kicker"><span id="totalCount">0</span> songs · one champion</div>
-    <h2>Which song <em>survives</em> them all?</h2>
-    <p class="lede">Put any two songs head to head. Keep one, and the other is out for good. Winners wait for the next round, until two remain for the final.</p>
-    <ol class="steps">
-      <li><span class="n">01</span><b>Pick two songs</b><span class="d">Search either dropdown, or tap a song in the list. You choose every matchup.</span></li>
-      <li><span class="n">02</span><b>Listen, then keep one</b><span class="d">Play a 30-second preview of each. The song you keep goes through to the next round. The other is out.</span></li>
-      <li><span class="n">03</span><b>Win round by round</b><span class="d">Every song battles once a round. When two songs are left, the final decides your champion.</span></li>
-    </ol>
-    <button class="keep" id="startBtn" type="button"><i data-lucide="swords"></i><span id="startLabel">Start battling</span></button>
-  </section>
 
   <section class="progress" aria-label="Progress">
     <div class="progress-meta">
@@ -85,7 +74,7 @@
     </div>
   </section>
 
-  <footer>A fan-made game, not affiliated with Taylor Swift. Song list from Wikipedia. Previews by Apple Music. Progress is saved in this browser.</footer>
+  <footer>A fan-made game, not affiliated with Taylor Swift<br>Built by Atharva Kadam</footer>
 </div>
 
 <script src="songs.js"></script>

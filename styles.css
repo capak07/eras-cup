@@ -317,3 +317,24 @@
   .pbar { height: 4px; background: var(--border); border-radius: 999px; overflow: hidden; }
   .pbar > div { height: 100%; width: 0; background: var(--gradient-gold); border-radius: 999px; transition: width 250ms linear; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Mobile: nothing may push the page wider than the screen */
+  html, body { max-width: 100%; overflow-x: hidden; }
+  @supports (overflow-x: clip) { html, body { overflow-x: clip; } }
+  .wrap, .duel > *, .card, .song, .lists, .panel, .player { min-width: 0; max-width: 100%; }
+  .song .album { flex-wrap: wrap; justify-content: center; max-width: 100%; }
+  footer { line-height: 1.7; }
+  @media (max-width: 760px) {
+    .duel { grid-template-columns: minmax(0, 1fr); }
+    .lists { grid-template-columns: minmax(0, 1fr); }
+    /* 16px stops iPhone Safari zooming in on a search box, which makes the page pan sideways */
+    .combo-input, .filters select, .filters input { font-size: 16px !important; }
+    header { flex-wrap: nowrap; }
+    .brand { min-width: 0; }
+    .tagline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .actions .btn-ghost { padding: 8px 10px; }
+  }
+  @media (max-width: 400px) {
+    .actions .btn-ghost { font-size: 0; gap: 0; }
+    .actions .btn-ghost svg { width: 17px; height: 17px; }
+  }

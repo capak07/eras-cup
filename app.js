@@ -179,8 +179,6 @@
     var done = state.champ ? total - 1 : outN;
     $('barFill').style.width = (total > 1 ? (done / (total - 1)) * 100 : 0) + '%';
     $('undoBtn').disabled = outN === 0 && !state.champ;
-    $('totalCount').textContent = total;
-    $('startLabel').textContent = outN ? 'Continue: Round ' + G.round + ', battle ' + G.battleNo : 'Start battling';
 
     var stage = stageName(G.start);
     $('kicker').textContent = G.isFinal ? 'Two songs remain' : 'Round ' + G.round + (stage ? ' · ' + stage : '') + ' · ' + G.avail.length + ' songs left to battle';
@@ -332,7 +330,7 @@
     if (openCombo && !e.target.closest('.combo')) closeCombo();
   });
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-keep], [data-load], [data-tab], [data-play], #undoBtn, #resetBtn, #randomBtn, #againBtn, #startBtn, #shareBtn');
+    var t = e.target.closest('[data-keep], [data-load], [data-tab], [data-play], #undoBtn, #resetBtn, #randomBtn, #againBtn, #shareBtn');
     if (!t) return;
     if (t.dataset.keep) keep(t.dataset.keep);
     else if (t.dataset.play) togglePlay(t.dataset.play);
@@ -347,11 +345,7 @@
       $('panel-standing').classList.toggle('on', t.dataset.tab === 'standing');
       $('panel-out').classList.toggle('on', t.dataset.tab === 'out');
     } else if (t.id === 'undoBtn') undo();
-    else if (t.id === 'startBtn') {
-      $('arena').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      var first = document.querySelector('#cardA .combo-input');
-      if (first && !state.a) setTimeout(function () { first.focus({ preventScroll: true }); }, 450);
-    } else if (t.id === 'shareBtn') {
+    else if (t.id === 'shareBtn') {
       var last = state.out[state.out.length - 1];
       var text = 'My Eras Cup champion: "' + state.champ + '"' + (last ? ' (beat "' + last.l + '" in the final, out of ' + SONGS.length + ' songs)' : '');
       var done = function (ok) {

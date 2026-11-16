@@ -12,6 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="themes.css">
 </head>
 <body>
 <div class="wrap">
@@ -26,6 +27,7 @@
     <div class="actions">
       <button class="btn-ghost" id="undoBtn" type="button" aria-label="Undo" title="Undo"><i data-lucide="undo-2"></i>Undo</button>
       <button class="btn-ghost" id="resetBtn" type="button" aria-label="Reset" title="Reset"><i data-lucide="rotate-ccw"></i>Reset</button>
+      <button class="btn-ghost icon-only" id="settingsBtn" type="button" aria-label="Settings" title="Settings"><i data-lucide="settings"></i></button>
     </div>
   </header>
 
@@ -76,6 +78,43 @@
 
   <footer>A fan-made game, not affiliated with Taylor Swift<br>Built by Atharva Kadam<br><span class="visitors" id="visitors" hidden></span></footer>
 </div>
+
+<section class="settings" id="settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
+  <div class="wrap">
+    <div class="s-head">
+      <h2 id="settingsTitle">Settings</h2>
+      <button class="btn-ghost" id="settingsClose" type="button"><i data-lucide="x"></i>Close</button>
+    </div>
+    <div class="s-tabs" role="tablist">
+      <button class="s-tab on" data-stab="themes" type="button" role="tab" aria-selected="true"><i data-lucide="palette"></i>Theme</button>
+      <button class="s-tab" data-stab="songs" type="button" role="tab" aria-selected="false"><i data-lucide="list-checks"></i>Songs in the battle</button>
+    </div>
+
+    <div id="stab-themes" role="tabpanel">
+      <p class="s-note">Pick an era. The theme changes straight away and is remembered in this browser.</p>
+      <div class="theme-grid" id="themeGrid"></div>
+    </div>
+
+    <div id="stab-songs" role="tabpanel" hidden>
+      <p class="s-note">Untick a song to leave it out of the battle.</p>
+      <div class="ex-bar">
+        <div class="filters">
+          <select id="exEra" aria-label="Filter by era"></select>
+          <input id="exSearch" type="search" placeholder="Search songs" aria-label="Search songs">
+        </div>
+        <div class="ex-quick">
+          <button class="btn-ghost" id="exOther" type="button"><i data-lucide="filter-x"></i>Exclude non-album songs</button>
+          <button class="btn-ghost" id="exReset" type="button"><i data-lucide="list-restart"></i>Include everything</button>
+        </div>
+      </div>
+      <div class="ex-list" id="exList"></div>
+      <div class="ex-save">
+        <div><div id="exSummary"></div><div class="ex-warn" id="exWarn"></div></div>
+        <button class="keep" id="exSave" type="button" disabled><i data-lucide="check"></i><span>Save changes</span></button>
+      </div>
+    </div>
+  </div>
+</section>
 
 <script src="songs.js"></script>
 <script src="app.js"></script>

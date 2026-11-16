@@ -1,17 +1,32 @@
 (function () {
   'use strict';
-  var SONGS = window.ERAS_CUP_SONGS || [];
+  var ALL = window.ERAS_CUP_SONGS || [], SONGS = ALL; // SONGS = the songs in the battle (ALL minus excluded)
   var ERA_NAMES = { debut: 'Taylor Swift', fearless: 'Fearless', 'speak-now': 'Speak Now', red: 'Red', '1989': '1989', reputation: 'reputation', lover: 'Lover', folklore: 'folklore', evermore: 'evermore', midnights: 'Midnights', ttpd: 'The Tortured Poets Department', showgirl: 'The Life of a Showgirl', other: 'Other songs' };
   var KEY = 'eras-cup-v1';
   var byTitle = {};
-  SONGS.forEach(function (s) { byTitle[s.t] = s; });
+  ALL.forEach(function (s) { byTitle[s.t] = s; });
+
+  // prefs = { excl: [titles left out of the battle], theme: key }
+  var prefs = { excl: [], theme: 'midnight' };
+  try {
+    var p = JSON.parse(localStorage.getItem('eras-cup-settings') || 'null');
+    if (p) prefs = { excl: Array.isArray(p.excl) ? p.excl.filter(function (t) { return byTitle[t]; }) : [], theme: typeof p.theme === 'string' ? p.theme : 'midnight' };
+  } catch (e) {}
+  function savePrefs() { try { localStorage.setItem('eras-cup-settings', JSON.stringify(prefs)); } catch (e) {} }
+  function pool() {
+    var ex = {}; prefs.excl.forEach(function (t) { ex[t] = 1; });
+    SONGS = ALL.filter(function (s) { return !ex[s.t]; });
+    if (SONGS.length < 2) { prefs.excl = []; SONGS = ALL; }
+  }
+  pool();
 
   // state.out = [{ l: loserTitle, w: winnerTitle }], oldest first. Rounds are replayed from it.
   var state = { out: [], a: null, b: null, champ: null };
   try {
     var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (saved && Array.isArray(saved.out)) {
-      saved.out = saved.out.filter(function (o) { return byTitle[o.l] && byTitle[o.w]; });
+      var inPool = {}; SONGS.forEach(function (s) { inPool[s.t] = 1; });
+      saved.out = saved.out.filter(function (o) { return inPool[o.l] && inPool[o.w]; });
       state = { out: saved.out, a: byTitle[saved.a] ? saved.a : null, b: byTitle[saved.b] ? saved.b : null, champ: byTitle[saved.champ] ? saved.champ : null };
     }
   } catch (e) { /* storage unavailable: play without saving */ }
@@ -464,11 +479,124 @@
     }
   });
 
-  // Era filter options, in album order, only for eras that have songs
-  var counts = {}; SONGS.forEach(function (s) { counts[s.e] = (counts[s.e] || 0) + 1; });
-  $('eraFilter').innerHTML = '<option value="">All eras</option>' + Object.keys(ERA_NAMES).filter(function (k) { return counts[k]; }).map(function (k) { return '<option value="' + k + '">' + esc(ERA_NAMES[k]) + '</option>'; }).join('');
+  // Era filter options, in album order, only for eras that have songs in the battle
+  function buildEraFilter() {
+    var counts = {}; SONGS.forEach(function (s) { counts[s.e] = (counts[s.e] || 0) + 1; });
+    $('eraFilter').innerHTML = '<option value="">All eras</option>' + Object.keys(ERA_NAMES).filter(function (k) { return counts[k]; }).map(function (k) { return '<option value="' + k + '">' + esc(ERA_NAMES[k]) + '</option>'; }).join('');
+  }
+  buildEraFilter();
 
-  if (!SONGS.length) { $('kicker').textContent = 'Song list failed to load (songs.js must sit next to index.html)'; icons(); return; }
+  // ---------- Settings: theme and excluded songs ----------
+  var THEMES = [['midnight', 'Midnight Rose', 'The original'], ['debut', 'Debut'], ['fearless', 'Fearless'], ['speak-now', 'Speak Now'], ['red', 'Red'], ['1989', '1989'],
+    ['reputation', 'reputation'], ['lover', 'Lover'], ['folklore', 'folklore'], ['evermore', 'evermore'], ['midnights', 'Midnights'],
+    ['ttpd', 'The Tortured Poets Department'], ['showgirl', 'The Life of a Showgirl']];
+  var draft = {}; // excluded titles being edited, applied on Save
+
+  function applyTheme(key) {
+    if (key === 'midnight') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', key);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', getComputedStyle(document.body).backgroundColor);
+  }
+
+  function openSettings(tab) {
+    draft = {}; prefs.excl.forEach(function (t) { draft[t] = 1; });
+    $('exSearch').value = ''; $('exEra').value = '';
+    showTab(tab || 'themes'); renderThemes(); renderExcl();
+    $('settings').hidden = false; document.body.classList.add('settings-open');
+    stopAudio(); closeCombo();
+    $('settingsClose').focus();
+  }
+  function closeSettings() {
+    $('settings').hidden = true; document.body.classList.remove('settings-open');
+    $('settingsBtn').focus();
+  }
+  function showTab(tab) {
+    document.querySelectorAll('[data-stab]').forEach(function (b) { var on = b.dataset.stab === tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+    $('stab-themes').hidden = tab !== 'themes'; $('stab-songs').hidden = tab !== 'songs';
+  }
+
+  function renderThemes() {
+    $('themeGrid').innerHTML = THEMES.map(function (t) {
+      var on = prefs.theme === t[0];
+      return '<button type="button" class="theme-card' + (on ? ' on' : '') + '" data-theme-pick="' + t[0] + '"' + (t[0] === 'midnight' ? '' : ' data-theme="' + t[0] + '"') + ' aria-pressed="' + on + '">' +
+        '<span class="tc-stage"><span class="tc-sw" style="background:var(--primary)"></span><span class="tc-sw" style="background:var(--accent)"></span><span class="tc-sw" style="background:var(--card);border-color:var(--border)"></span></span>' +
+        '<span class="tc-name">' + esc(t[1]) + '</span>' + (on ? '<span class="tc-check"><i data-lucide="check"></i></span>' : '') + '</button>';
+    }).join('');
+    icons();
+  }
+
+  function draftCount() { return Object.keys(draft).length; }
+  function renderExcl() {
+    var era = $('exEra').value, q = $('exSearch').value.trim().toLowerCase();
+    var groups = Object.keys(ERA_NAMES).map(function (k) {
+      var all = ALL.filter(function (s) { return s.e === k; });
+      var shown = all.filter(function (s) { return (!era || era === k) && (!q || s.t.toLowerCase().indexOf(q) !== -1); });
+      return { k: k, all: all, shown: shown };
+    }).filter(function (g) { return g.shown.length; });
+    $('exList').innerHTML = groups.length ? groups.map(function (g) {
+      var inN = g.all.filter(function (s) { return !draft[s.t]; }).length;
+      return '<div class="ex-group" style="--era:var(--era-' + g.k + ')"><div class="ex-head"><span class="dot"></span><b>' + esc(ERA_NAMES[g.k]) + '</b>' +
+        '<span class="ex-count">' + inN + ' / ' + g.all.length + '</span>' +
+        '<button type="button" class="ex-all" data-ex-era="' + g.k + '" data-ex-to="' + (inN ? 'out' : 'in') + '">' + (inN ? 'Exclude all' : 'Include all') + '</button></div>' +
+        '<ul>' + g.shown.map(function (s) {
+          return '<li><label class="ex-row' + (draft[s.t] ? ' off' : '') + '"><input type="checkbox" data-ex-song="' + esc(s.t) + '"' + (draft[s.t] ? '' : ' checked') + '>' +
+            '<span class="ex-box"><i data-lucide="check"></i></span><span class="r-title">' + esc(s.t) + '</span>' + (s.by ? '<span class="r-sub">' + esc(s.by) + '</span>' : '') + '</label></li>';
+        }).join('') + '</ul></div>';
+    }).join('') : '<div class="none">No songs match.</div>';
+    updateExSummary(); icons();
+  }
+  function updateExSummary() {
+    var inBattle = ALL.length - draftCount(), changed = draftCount() !== prefs.excl.length || prefs.excl.some(function (t) { return !draft[t]; });
+    $('exSummary').innerHTML = '<b class="mono">' + inBattle + '</b> of ' + ALL.length + ' songs in the battle';
+    var save = $('exSave');
+    save.disabled = !changed || inBattle < 2;
+    $('exWarn').textContent = inBattle < 2 ? 'Keep at least 2 songs in the battle.' :
+      changed && state.out.length ? 'Saving starts a new game: your ' + state.out.length + (state.out.length === 1 ? ' battle' : ' battles') + ' will be cleared.' : '';
+  }
+  function saveExcl() {
+    var inBattle = ALL.length - draftCount();
+    if (inBattle < 2) return;
+    if (state.out.length && !window.confirm('Save and start a new game? Your ' + state.out.length + (state.out.length === 1 ? ' battle' : ' battles') + ' will be cleared.')) return;
+    prefs.excl = Object.keys(draft); savePrefs();
+    pool();
+    state = { out: [], a: null, b: null, champ: null }; lastOutCount = -1; lastRound = 0;
+    buildEraFilter(); render(); updateExSummary();
+    var b = $('exSave'), l = b.querySelector('span'); l.textContent = 'Saved'; setTimeout(function () { l.textContent = 'Save changes'; }, 1600);
+  }
+
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.dataset.exSong !== undefined) {
+      if (t.checked) delete draft[t.dataset.exSong]; else draft[t.dataset.exSong] = 1;
+      t.closest('.ex-row').classList.toggle('off', !t.checked);
+      var g = t.closest('.ex-group'), k = g.querySelector('.ex-all').dataset.exEra;
+      var all = ALL.filter(function (s) { return s.e === k; }), inN = all.filter(function (s) { return !draft[s.t]; }).length;
+      g.querySelector('.ex-count').textContent = inN + ' / ' + all.length;
+      var btn = g.querySelector('.ex-all'); btn.dataset.exTo = inN ? 'out' : 'in'; btn.textContent = inN ? 'Exclude all' : 'Include all';
+      updateExSummary();
+    } else if (t.id === 'exEra') renderExcl();
+  });
+  document.addEventListener('input', function (e) { if (e.target.id === 'exSearch') renderExcl(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !$('settings').hidden) closeSettings(); });
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('#settingsBtn, #settingsClose, [data-stab], [data-theme-pick], [data-ex-era], #exReset, #exSave, #exOther');
+    if (!t) return;
+    if (t.id === 'settingsBtn') openSettings();
+    else if (t.id === 'settingsClose') closeSettings();
+    else if (t.dataset.stab) showTab(t.dataset.stab);
+    else if (t.dataset.themePick) { prefs.theme = t.dataset.themePick; savePrefs(); applyTheme(prefs.theme); renderThemes(); }
+    else if (t.dataset.exEra) {
+      ALL.forEach(function (s) { if (s.e === t.dataset.exEra) { if (t.dataset.exTo === 'out') draft[s.t] = 1; else delete draft[s.t]; } });
+      renderExcl();
+    } else if (t.id === 'exOther') { ALL.forEach(function (s) { if (s.e === 'other') draft[s.t] = 1; }); renderExcl(); }
+    else if (t.id === 'exReset') { draft = {}; renderExcl(); }
+    else if (t.id === 'exSave') saveExcl();
+  });
+  $('exEra').innerHTML = '<option value="">All eras</option>' + Object.keys(ERA_NAMES).map(function (k) { return '<option value="' + k + '">' + esc(ERA_NAMES[k]) + '</option>'; }).join('');
+  applyTheme(prefs.theme);
+
+  if (!ALL.length) { $('kicker').textContent = 'Song list failed to load (songs.js must sit next to index.html)'; icons(); return; }
   render();
   visitors();
 })();
